@@ -5,11 +5,11 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 from zoneinfo import ZoneInfo
 
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
-from homeassistant.components.sensor import SensorEntity
 
 from ...device_handler import BaseDeviceHandler
 
@@ -30,15 +30,25 @@ class SchedulingAnalysisDeviceHandler(BaseDeviceHandler):
         return coordinator
 
     async def _async_get_data(self) -> Dict[str, Any]:
-        """Get Scheduling Analysis data."""
+        """Get Scheduling Analysis and benefit data."""
 
-        async def get_scheduling_analysis(client):
-            return await self.hass.async_add_executor_job(
+        async def get_data(client):
+            scheduling_analysis = await self.hass.async_add_executor_job(
                 client.get_scheduling_analysis,
                 self.device_id,
             )
 
-        return await self._get_client_and_retry(get_scheduling_analysis)
+            ai_revenue = await self.hass.async_add_executor_job(
+                client.get_ai_revenue,
+                self.device_id,
+            )
+
+            return {
+                "scheduling_analysis": scheduling_analysis,
+                "ai_revenue": ai_revenue,
+            }
+
+        return await self._get_client_and_retry(get_data)
 
     def create_entities(self, coordinator: DataUpdateCoordinator) -> list:
         """Create Scheduling Analysis entities."""
@@ -46,14 +56,34 @@ class SchedulingAnalysisDeviceHandler(BaseDeviceHandler):
             SchedulingAnalysisSensor(
                 coordinator=coordinator,
                 device_info=self.device_info,
-            )
+            ),
+            BenefitDaysElapsedSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
+            BenefitIncreaseRateSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
+            TotalBenefitIncreaseSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
+            DefaultPoliciesBenefitSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
+            EnergyManagementAssistantBenefitSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
         ]
 
 
 class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
     """Sensor for FusionSolar SmartEMO Scheduling Analysis."""
 
-    _attr_name = "Energy Management Assistant"
+    _attr_name = "Scheduling Analysis"
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, coordinator, device_info):
@@ -98,7 +128,8 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
                 "schedules": [],
             }
 
-        cards = data.get("data", {}).get("cards", [])
+        scheduling_data = data.get("scheduling_analysis", {})
+        cards = scheduling_data.get("data", {}).get("cards", [])
         schedules = [card for card in cards if card is not None]
 
         card = self._current_or_next_card()
@@ -131,9 +162,10 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
         if not data:
             return None
 
+        scheduling_data = data.get("scheduling_analysis", {})
         cards = [
             card
-            for card in data.get("data", {}).get("cards", [])
+            for card in scheduling_data.get("data", {}).get("cards", [])
             if card is not None
         ]
 
@@ -167,4 +199,131 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
         return (
             self.coordinator.last_update_success
             and self.coordinator.data is not None
+        )
+
+
+class BenefitSensorBase(CoordinatorEntity, SensorEntity):
+    """Base sensor for Energy Management Assistant benefit data."""
+
+    def __init__(self, coordinator, device_info, unique_id_suffix):
+        super().__init__(coordinator)
+        self._attr_device_info = device_info
+        device_id = list(device_info["identifiers"])[0][1]
+        self._attr_unique_id = f"{device_id}_{unique_id_suffix}"
+
+    @property
+    def available(self):
+        """Return whether benefit data is available."""
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.data is not None
+            and self.coordinator.data.get("ai_revenue") is not None
+        )
+
+
+class BenefitDaysElapsedSensor(BenefitSensorBase):
+    """Sensor for Energy Management Assistant elapsed days."""
+
+    _attr_name = "Days elapsed"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_native_unit_of_measurement = "d"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(
+            coordinator,
+            device_info,
+            "benefit_days_elapsed",
+        )
+
+    @property
+    def native_value(self):
+        """Return the number of elapsed days."""
+        return self.coordinator.data.get("ai_revenue", {}).get("days_elapsed")
+
+
+class BenefitIncreaseRateSensor(BenefitSensorBase):
+    """Sensor for Energy Management Assistant benefit increase rate."""
+
+    _attr_name = "Total benefit increase rate"
+    _attr_icon = "mdi:percent"
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(
+            coordinator,
+            device_info,
+            "benefit_increase_rate",
+        )
+
+    @property
+    def native_value(self):
+        """Return the total benefit increase rate."""
+        return self.coordinator.data.get("ai_revenue", {}).get(
+            "total_benefit_increase_rate"
+        )
+
+
+class TotalBenefitIncreaseSensor(BenefitSensorBase):
+    """Sensor for Energy Management Assistant total benefit increase."""
+
+    _attr_name = "Total benefit increase"
+    _attr_icon = "mdi:cash-plus"
+    _attr_native_unit_of_measurement = "€"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(
+            coordinator,
+            device_info,
+            "total_benefit_increase",
+        )
+
+    @property
+    def native_value(self):
+        """Return the total benefit increase."""
+        return self.coordinator.data.get("ai_revenue", {}).get(
+            "total_benefit_increase"
+        )
+
+
+class DefaultPoliciesBenefitSensor(BenefitSensorBase):
+    """Sensor for Energy Management Assistant default policy benefit."""
+
+    _attr_name = "Benefit under default policies"
+    _attr_icon = "mdi:cash"
+    _attr_native_unit_of_measurement = "€"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(
+            coordinator,
+            device_info,
+            "benefit_under_default_policies",
+        )
+
+    @property
+    def native_value(self):
+        """Return the benefit under default policies."""
+        return self.coordinator.data.get("ai_revenue", {}).get(
+            "benefit_under_default_policies"
+        )
+
+
+class EnergyManagementAssistantBenefitSensor(BenefitSensorBase):
+    """Sensor for Energy Management Assistant benefit."""
+
+    _attr_name = "Benefit with Energy Management Assistant"
+    _attr_icon = "mdi:cash-plus"
+    _attr_native_unit_of_measurement = "€"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(
+            coordinator,
+            device_info,
+            "benefit_with_energy_management_assistant",
+        )
+
+    @property
+    def native_value(self):
+        """Return the benefit with Energy Management Assistant."""
+        return self.coordinator.data.get("ai_revenue", {}).get(
+            "benefit_with_energy_management_assistant"
         )

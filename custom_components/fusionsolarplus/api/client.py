@@ -753,7 +753,11 @@ class FusionSolarClient:
     @logged_in
     def get_scheduling_analysis(self, plant_dn: str) -> dict:
         return scheduling_analysis_api.get_scheduling_analysis(self, plant_dn)
-  
+
+    @logged_in
+    def get_ai_revenue(self, plant_dn: str) -> dict:
+        return scheduling_analysis_api.get_ai_revenue(self, plant_dn)
+
     @logged_in
     def get_plant_ids(self) -> list:
         return plant_api.get_plant_ids(self)

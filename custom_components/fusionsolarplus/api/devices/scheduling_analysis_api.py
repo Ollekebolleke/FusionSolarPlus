@@ -59,3 +59,60 @@ def get_scheduling_analysis(client, plant_dn: str) -> dict:
         )
 
     return data
+
+AI_REVENUE_PATH = (
+    "/rest/neteco/web/dpaiplugin/aifc/queryAiRevenue/v1"
+)
+
+
+def get_ai_revenue(client, plant_dn: str) -> dict:
+    """Get Energy Management Assistant benefit data for a plant."""
+
+    url = (
+        f"https://{client._huawei_subdomain}.fusionsolar.huawei.com"
+        f"{AI_REVENUE_PATH}"
+    )
+
+    payload = {
+        "plantDn": plant_dn,
+        "showNegativeRevenue": True,
+    }
+
+    response = client._session.post(
+        url,
+        json=payload,
+        headers={
+            "x-non-renewal-session": "true",
+        },
+        timeout=30,
+    )
+
+    if response.status_code != 200:
+        raise FusionSolarException(
+            f"AI Revenue request failed: "
+            f"HTTP {response.status_code}"
+        )
+
+    data = response.json()
+
+    if not data.get("success"):
+        raise FusionSolarException(
+            f"AI Revenue API error: "
+            f"{data.get('failCode', 'Unknown error')}"
+        )
+
+    revenue = data.get("data", {})
+
+    return {
+        "days_elapsed": revenue.get("openDays"),
+        "total_benefit_increase_rate": float(
+            revenue["revenueRatio"]
+        ) if revenue.get("revenueRatio") is not None else None,
+        "total_benefit_increase": revenue.get("realRevenue"),
+        "benefit_under_default_policies": revenue.get("stdRevenue"),
+        "benefit_with_energy_management_assistant": revenue.get(
+            "totalRevenue"
+        ),
+        "measure_unit": revenue.get("measureUnit"),
+        "has_ai_revenue": revenue.get("hasAiRevenue"),
+    }
