@@ -29,6 +29,7 @@ DEVICE_TYPE_BATTERY = "Battery"
 DEVICE_TYPE_POWER_SENSOR = "Power Sensor"
 DEVICE_TYPE_EMMA = "SmartAssistant"
 DEVICE_TYPE_BACKUPBOX = "BackupBox"
+DEVICE_TYPE_SCHEDULING_ANALYSIS = "SchedulingAnalysis"
 
 DEVICE_TYPE_OPTIONS = {
     "Plant": DEVICE_TYPE_PLANT,
@@ -38,6 +39,7 @@ DEVICE_TYPE_OPTIONS = {
     "Power Sensor": DEVICE_TYPE_POWER_SENSOR,
     "SmartAssistant": DEVICE_TYPE_EMMA,
     "BackupBox": DEVICE_TYPE_BACKUPBOX,
+    "Energy Management Assistant": DEVICE_TYPE_SCHEDULING_ANALYSIS,
 }
 
 
@@ -231,6 +233,27 @@ class FusionSolarPlusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         if device["type"] == "BackupBox":
                             device_dn = device["deviceDn"]
                             device_options[f"BackupBox (ID: {device_dn})"] = device_dn
+
+                # Handle Scheduling Analysis
+                elif self.device_type == DEVICE_TYPE_SCHEDULING_ANALYSIS:
+                    response = await self.hass.async_add_executor_job(
+                        self.client.get_device_ids
+                    )
+
+                    emma_available = any(
+                        device["type"] in ["EMMA", "SmartAssistant"]
+                        for device in response
+                    )
+
+                    if emma_available:
+                        plant_ids = await self.hass.async_add_executor_job(
+                            self.client.get_plant_ids
+                        )
+
+                        for plant_id in plant_ids:
+                            device_options[
+                                f"Energy Management Assistant (Plant ID: {plant_id})"
+                            ] = plant_id
 
                 if not device_options:
                     _LOGGER.warning(
