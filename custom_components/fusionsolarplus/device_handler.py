@@ -104,11 +104,21 @@ class BaseDeviceHandler:
                 if attempt < max_retries:
                     recovery_success = False
                     try:
-                        await self.hass.async_add_executor_job(client._login)
+                        def reset_and_login():
+                            import requests
+
+                            client._session = requests.Session()
+                            client._configure_session()
+
+                        await self.hass.async_add_executor_job(
+                            reset_and_login
+                        )
+
                         if await self.hass.async_add_executor_job(
                             client.is_session_active
                         ):
                             recovery_success = True
+
                     except Exception:
                         pass
 
