@@ -14,6 +14,20 @@ from homeassistant.helpers.update_coordinator import (
 from ...device_handler import BaseDeviceHandler
 
 
+def _parse_time(value: str) -> datetime | None:
+    """Parse a FusionSolar Scheduling Analysis timestamp."""
+    if not value:
+        return None
+
+    try:
+        return datetime.strptime(
+            value.removesuffix(" DST"),
+            "%Y-%m-%d %H:%M",
+        ).replace(tzinfo=ZoneInfo("Europe/Berlin"))
+    except ValueError:
+        return None
+
+
 class SchedulingAnalysisDeviceHandler(BaseDeviceHandler):
     """Handle FusionSolar SmartEMO Scheduling Analysis."""
 
@@ -54,6 +68,10 @@ class SchedulingAnalysisDeviceHandler(BaseDeviceHandler):
         """Create Scheduling Analysis entities."""
         return [
             SchedulingAnalysisSensor(
+                coordinator=coordinator,
+                device_info=self.device_info,
+            ),
+            ActualESScheduleSensor(
                 coordinator=coordinator,
                 device_info=self.device_info,
             ),
@@ -143,19 +161,6 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
             "schedules": schedules,
         }
 
-    def _parse_time(self, value: str) -> datetime | None:
-        """Parse a FusionSolar Scheduling Analysis timestamp."""
-        if not value:
-            return None
-
-        try:
-            return datetime.strptime(
-                value.removesuffix(" DST"),
-                "%Y-%m-%d %H:%M",
-            ).replace(tzinfo=ZoneInfo("Europe/Berlin"))
-        except ValueError:
-            return None
-
     def _current_or_next_card(self):
         """Return the current scheduling card, or the next future card."""
         data = self.coordinator.data
@@ -173,8 +178,8 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
 
         # First prefer a card that is active right now.
         for card in cards:
-            start = self._parse_time(card.get("startTime"))
-            end = self._parse_time(card.get("endTime"))
+            start = _parse_time(card.get("startTime"))
+            end = _parse_time(card.get("endTime"))
 
             if start and end and start <= now < end:
                 return card
@@ -183,13 +188,102 @@ class SchedulingAnalysisSensor(CoordinatorEntity, SensorEntity):
         future_cards = []
 
         for card in cards:
-            start = self._parse_time(card.get("startTime"))
+            start = _parse_time(card.get("startTime"))
 
             if start and start > now:
                 future_cards.append((start, card))
 
         if future_cards:
             return min(future_cards, key=lambda item: item[0])[1]
+
+        return None
+
+    @property
+    def available(self):
+        """Return whether Scheduling Analysis data is available."""
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.data is not None
+        )
+
+
+class ActualESScheduleSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for the currently active FusionSolar ESS schedule."""
+
+    _attr_name = "Actual ESS Schedule"
+    _attr_icon = "mdi:battery-clock-outline"
+
+    def __init__(self, coordinator, device_info):
+        super().__init__(coordinator)
+        self._attr_device_info = device_info
+        device_id = list(device_info["identifiers"])[0][1]
+        self._attr_unique_id = f"{device_id}_actual_ess_schedule"
+
+    @property
+    def native_value(self):
+        """Return the currently active ESS schedule."""
+        card = self._active_card()
+
+        if not card:
+            return "No active schedule"
+
+        storage_msg = card.get("storageMsg")
+        grid_msg = card.get("gridMsg")
+
+        if storage_msg:
+            return storage_msg
+
+        if grid_msg:
+            return grid_msg
+
+        return "Active"
+
+    @property
+    def extra_state_attributes(self):
+        """Return details of the currently active ESS schedule."""
+        card = self._active_card()
+
+        if not card:
+            return {
+                "start_time": None,
+                "end_time": None,
+                "storage_msg": None,
+                "grid_msg": None,
+                "description": None,
+            }
+
+        start = _parse_time(card.get("startTime"))
+        end = _parse_time(card.get("endTime"))
+
+        return {
+            "start_time": start.isoformat() if start else None,
+            "end_time": end.isoformat() if end else None,
+            "storage_msg": card.get("storageMsg"),
+            "grid_msg": card.get("gridMsg"),
+            "description": card.get("description"),
+        }
+
+    def _active_card(self):
+        """Return the scheduling card that is active right now."""
+        data = self.coordinator.data
+        if not data:
+            return None
+
+        scheduling_data = data.get("scheduling_analysis", {})
+        cards = [
+            card
+            for card in scheduling_data.get("data", {}).get("cards", [])
+            if card is not None
+        ]
+
+        now = datetime.now(ZoneInfo("Europe/Berlin"))
+
+        for card in cards:
+            start = _parse_time(card.get("startTime"))
+            end = _parse_time(card.get("endTime"))
+
+            if start and end and start <= now < end:
+                return card
 
         return None
 
