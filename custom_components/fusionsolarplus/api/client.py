@@ -32,6 +32,7 @@ from .devices import (
     charger_api,
     plant_api,
     emma_api,
+    scheduling_analysis_api,
 )
 
 # global logger object
@@ -748,6 +749,14 @@ class FusionSolarClient:
     @logged_in
     def get_current_plant_data(self, plant_id: str) -> dict:
         return plant_api.get_current_plant_data(self, plant_id)
+
+    @logged_in
+    def get_scheduling_analysis(self, plant_dn: str) -> dict:
+        return scheduling_analysis_api.get_scheduling_analysis(self, plant_dn)
+
+    @logged_in
+    def get_ai_revenue(self, plant_dn: str) -> dict:
+        return scheduling_analysis_api.get_ai_revenue(self, plant_dn)
 
     @logged_in
     def get_plant_ids(self) -> list:
